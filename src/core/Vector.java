@@ -62,7 +62,7 @@ public class Vector {
             return new Vector(0, 0, 0);
         }
         return new Vector(this.x / mag, this.y / mag, this.z / mag);
-}
+    }
 
     public Vector scale(double scalar) {
         return new Vector(this.x * scalar, this.y * scalar, this.z * scalar);
