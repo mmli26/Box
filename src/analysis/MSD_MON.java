@@ -6,11 +6,12 @@ import core.Vector;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.*;
 
 public class MSD_MON {
     public Map<Integer, Double> calcMsd(List<Polymer> trajectory) {
-        TreeMap<Integer, Double> msdSums = new TreeMap<>();
-        TreeMap<Integer, Integer> counts = new TreeMap<>();
+        ConcurrentMap<Integer, Double> msdSums = new ConcurrentHashMap<>();
+        ConcurrentMap<Integer, Integer> counts = new ConcurrentHashMap<>();
 
         int nSnapshots = trajectory.size();
         if (nSnapshots < 2) {
@@ -22,31 +23,49 @@ public class MSD_MON {
             return new TreeMap<>();
         }
 
+        int nThreads = Runtime.getRuntime().availableProcessors();
+        ExecutorService executor = Executors.newFixedThreadPool(nThreads);
+        List<Future<?>> futures = new CopyOnWriteArrayList<>();
+
         for (int dt = 1; dt < nSnapshots; dt++) {
-            double currentMsdSum = 0.0;
-            int currentCount = 0;
+            final int time_delta = dt;
 
-            for (int i = 0; i < nSnapshots - dt; i++) {
-                int j = i + dt;
+            Future<?> future = executor.submit(() -> {
+                double currentMsdSum = 0.0;
+                int currentCount = 0;
 
-                Polymer snapshot_i = trajectory.get(i);
-                Polymer snapshot_j = trajectory.get(j);
+                for (int i = 0; i < nSnapshots - time_delta; i++) {
+                    int j = i + time_delta;
 
-                for (int p = 0; p < nParticles; p++) {
-                    Vector pos_i = snapshot_i.getMonomers().get(p).getPosition();
-                    Vector pos_j = snapshot_j.getMonomers().get(p).getPosition();
+                    Polymer snapshot_i = trajectory.get(i);
+                    Polymer snapshot_j = trajectory.get(j);
 
-                    Vector displacement = pos_j.sub(pos_i);
-                    currentMsdSum += displacement.dot(displacement);
-                    currentCount++;
+                    for (int p = 0; p < nParticles; p++) {
+                        Vector pos_i = snapshot_i.getMonomers().get(p).getPosition();
+                        Vector pos_j = snapshot_j.getMonomers().get(p).getPosition();
+
+                        Vector displacement = pos_j.sub(pos_i);
+                        currentMsdSum += displacement.dot(displacement);
+                        currentCount++;
+                    }
                 }
-            }
 
-            if (currentCount > 0) {
-                msdSums.put(dt, currentMsdSum);
-                counts.put(dt, currentCount);
+                if (currentCount > 0) {
+                    msdSums.put(time_delta, currentMsdSum);
+                    counts.put(time_delta, currentCount);
+                }
+            });
+            futures.add(future);
+        }
+
+        for (Future<?> f : futures) {
+            try {
+                f.get();
+            } catch (InterruptedException | ExecutionException e) {
+                e.printStackTrace();
             }
         }
+        executor.shutdown();
 
         TreeMap<Integer, Double> finalMsd = new TreeMap<>();
         for (int dt : msdSums.keySet()) {
